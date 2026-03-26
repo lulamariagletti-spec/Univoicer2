@@ -1079,18 +1079,25 @@
       list-style: none;
       margin: 0;
       padding: 0;
-      display: flex;
-      flex-wrap: wrap;
-      gap: 12px;
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+      gap: 10px;
     }
     .actor-character-item {
-      width: min(190px, 100%);
+      width: 100%;
       padding: 8px;
       border-radius: 12px;
       border: 1px solid rgba(111, 180, 255, .26);
       background: rgba(13, 25, 49, .72);
       display: grid;
       gap: 6px;
+    }
+    .actor-blocked-actions {
+      margin: 0 0 10px;
+    }
+    .actor-blocked-actions input {
+      max-width: 250px;
+      flex: 1 1 200px;
     }
     .actor-character-item.locked {
       border-style: dashed;
@@ -3426,9 +3433,13 @@
           </div>
           ${actor && state.actorDetailsExpanded ? `
             <article class="mock-box actor-detail-grid">
-              <div>
+              <div style="grid-column: 1 / -1;">
               <h3>${actor}</h3>
               <p class="muted">Personajes: ${actorCharacters.length} · Videos: ${actorVideos.length}</p>
+                <div class="actions actor-blocked-actions">
+                  <input id="blockedCharacterInput" type="text" placeholder="Agregar personaje bloqueado">
+                  <button id="addBlockedCharacter" class="neon-btn">Agregar bloqueado</button>
+                </div>
                 <ul class="actor-character-list">
                   ${actorCharacterCards.map((item) => `
                     <li class="actor-character-item ${item.unlocked ? 'unlocked' : 'locked'}">
@@ -3442,15 +3453,6 @@
                     </li>
                   `).join('') || '<li class="actor-character-item locked">Sin personajes registrados.</li>'}
                 </ul>
-              </div>
-              <div>
-                <h3>Personajes sin saludo (bloqueados)</h3>
-                <ul>${blockedOnly.map(item => `<li>${item}</li>`).join('') || '<li>Sin personajes bloqueados.</li>'}</ul>
-                <div class="actions">
-                  <input id="blockedCharacterInput" type="text" placeholder="Agregar personaje sin saludo">
-                  <button id="addBlockedCharacter" class="neon-btn">Agregar bloqueado</button>
-                </div>
-                <p class="section-note">Al agregar un video para este personaje, se desbloquea automáticamente.</p>
               </div>
             </article>
           ` : '<p class="muted">Sin actores registrados.</p>'}
