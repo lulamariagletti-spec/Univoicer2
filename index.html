@@ -936,8 +936,20 @@
     </div>
   </main>
 
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-database-compat.js"></script>
   <script>
     const VIDEOS = [];
+    const firebaseConfig = {
+      apiKey: 'AIzaSyD7Hn2RHrDQRlUB-XcPtsDQ8WzWQ-q426Y',
+      authDomain: 'univoicer-580d6.firebaseapp.com',
+      databaseURL: 'https://univoicer-580d6-default-rtdb.firebaseio.com',
+      projectId: 'univoicer-580d6',
+      storageBucket: 'univoicer-580d6.firebasestorage.app',
+      messagingSenderId: '732222737914',
+      appId: '1:732222737914:web:80df5bef1843219f81a843',
+      measurementId: 'G-BPKPZTJDTY'
+    };
 
     const state = {
       view: 'map',
@@ -952,9 +964,13 @@
       mapCanvas: { width: 1400, height: 900 }
     };
     const UNIVERSES_STORAGE_KEY = 'universes_map_v1';
+    const VIDEOS_STORAGE_KEY = 'videos_collection_v1';
+    const CLOUD_STORAGE_PATH = 'univoicerData/main';
     const MAX_LOCAL_IMAGE_BYTES = 2 * 1024 * 1024;
     const NODE_HALF_WIDTH = 110;
     const NODE_HALF_HEIGHT = 93;
+    let firebaseDb = null;
+    let cloudSyncTimer = null;
 
     const appLayout = document.getElementById('appLayout');
     const toggleSidebar = document.getElementById('toggleSidebar');
@@ -1041,6 +1057,7 @@
 
     function saveUniverseNodes() {
       localStorage.setItem(UNIVERSES_STORAGE_KEY, JSON.stringify(state.universeNodes));
+      scheduleCloudSync();
     }
 
     function loadUniverseNodesFromStorage() {
@@ -1063,6 +1080,66 @@
       } catch (_) {
         return [];
       }
+    }
+
+    function saveVideos() {
+      localStorage.setItem(VIDEOS_STORAGE_KEY, JSON.stringify(VIDEOS));
+      scheduleCloudSync();
+    }
+
+    function loadVideosFromStorage() {
+      try {
+        const raw = localStorage.getItem(VIDEOS_STORAGE_KEY);
+        if (!raw) return;
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) return;
+        VIDEOS.splice(0, VIDEOS.length, ...parsed.filter(video => video && typeof video === 'object'));
+      } catch (_) {
+        VIDEOS.splice(0, VIDEOS.length);
+      }
+    }
+
+    function initFirebase() {
+      if (!window.firebase) return false;
+      const app = firebase.apps.length ? firebase.app() : firebase.initializeApp(firebaseConfig);
+      firebaseDb = app.database();
+      return true;
+    }
+
+    async function loadFromFirebase() {
+      if (!firebaseDb) return;
+      try {
+        const snapshot = await firebaseDb.ref(CLOUD_STORAGE_PATH).get();
+        const data = snapshot.val();
+        if (!data || typeof data !== 'object') return;
+
+        if (Array.isArray(data.universeNodes)) {
+          state.universeNodes = data.universeNodes;
+          localStorage.setItem(UNIVERSES_STORAGE_KEY, JSON.stringify(state.universeNodes));
+        }
+        if (Array.isArray(data.videos)) {
+          VIDEOS.splice(0, VIDEOS.length, ...data.videos.filter(video => video && typeof video === 'object'));
+          localStorage.setItem(VIDEOS_STORAGE_KEY, JSON.stringify(VIDEOS));
+        }
+      } catch (err) {
+        console.warn('No se pudo leer Firebase, usando almacenamiento local.', err);
+      }
+    }
+
+    function scheduleCloudSync() {
+      if (!firebaseDb) return;
+      clearTimeout(cloudSyncTimer);
+      cloudSyncTimer = setTimeout(async () => {
+        try {
+          await firebaseDb.ref(CLOUD_STORAGE_PATH).set({
+            updatedAt: Date.now(),
+            universeNodes: state.universeNodes,
+            videos: VIDEOS
+          });
+        } catch (err) {
+          console.warn('No se pudo guardar en Firebase.', err);
+        }
+      }, 450);
     }
 
     function getVideoUniverses(video) {
@@ -1656,6 +1733,7 @@
         }
         state.universe = cleanName;
         saveUniverseNodes();
+        saveVideos();
         renderMapView();
         renderUniverseView();
       };
@@ -1670,6 +1748,7 @@
           if (!getVideoUniverses(VIDEOS[i]).length) VIDEOS.splice(i, 1);
         }
         saveUniverseNodes();
+        saveVideos();
         state.universe = null;
         changeView('map');
       };
@@ -1698,6 +1777,7 @@
           rareza: String(formData.get('rareza') || 'Común')
         };
         VIDEOS.push(newVideo);
+        saveVideos();
         state.showAddForm = false;
         state.selectedVideoId = newVideo.id;
         renderMapView();
@@ -2124,7 +2204,13 @@
     navConfig.onclick = () => changeView('config');
 
     state.universeNodes = loadUniverseNodesFromStorage();
-    changeView('map');
+    loadVideosFromStorage();
+
+    (async () => {
+      initFirebase();
+      await loadFromFirebase();
+      changeView('map');
+    })();
   </script>
 </body>
 </html>
