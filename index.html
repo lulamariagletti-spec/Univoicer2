@@ -905,6 +905,29 @@
     .detail-close {
       justify-self: end;
     }
+    .profile-layout { display: grid; gap: 14px; }
+    .profile-section {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 12px;
+      background: rgba(13, 27, 52, .88);
+    }
+    .profile-section h4 { margin: 0 0 8px; }
+    .profile-status { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; }
+    .status-pill { border-radius: 999px; padding: 4px 10px; border: 1px solid var(--line); font-size: .85rem; }
+    .status-pill.unlocked { border-color: color-mix(in srgb, var(--ok) 50%, white); background: var(--ok-soft); color: #8effcc; }
+    .status-pill.locked { border-color: rgba(255, 125, 125, .45); background: rgba(109, 37, 37, .2); color: #ffb6b6; }
+    .inline-feedback { min-height: 20px; margin: 6px 0 0; color: #9ff7c8; font-size: .9rem; }
+    .character-link {
+      border: 0;
+      background: none;
+      box-shadow: none;
+      color: var(--accent);
+      padding: 0;
+      font-weight: 700;
+      text-decoration: underline;
+      min-height: auto;
+    }
     .mock-shell {
       background: var(--panel);
       border: 1px solid var(--line);
@@ -1017,6 +1040,7 @@
         <section id="viewBuscar" class="view"></section>
         <section id="viewStats" class="view"></section>
         <section id="viewConfig" class="view"></section>
+        <section id="viewCharacterProfile" class="view"></section>
       </section>
     </div>
   </main>
@@ -1047,10 +1071,12 @@
       marathon: { active: false, queue: [], position: 0 },
       universeNodes: [],
       mapCanvas: { width: 1400, height: 900 },
-      blockedCharactersByActor: {}
+      blockedCharactersByActor: {},
+      characterProfileId: null
     };
     const UNIVERSES_STORAGE_KEY = 'universes_map_v1';
     const VIDEOS_STORAGE_KEY = 'videos_collection_v1';
+    const COLLECTION_MODEL_STORAGE_KEY = 'collection_model_v1';
     const BLOCKED_CHARACTERS_STORAGE_KEY = 'blocked_characters_by_actor_v1';
     const CLOUD_STORAGE_PATH = 'univoicerData/main';
     const MAX_LOCAL_IMAGE_BYTES = 2 * 1024 * 1024;
@@ -1058,6 +1084,12 @@
     const NODE_HALF_HEIGHT = 93;
     let firebaseDb = null;
     let cloudSyncTimer = null;
+    let collectionModel = {
+      actors: [],
+      characters: [],
+      universes: [],
+      videos: []
+    };
 
     const appLayout = document.getElementById('appLayout');
     const toggleSidebar = document.getElementById('toggleSidebar');
@@ -1086,6 +1118,7 @@
     const viewBuscar = document.getElementById('viewBuscar');
     const viewStats = document.getElementById('viewStats');
     const viewConfig = document.getElementById('viewConfig');
+    const viewCharacterProfile = document.getElementById('viewCharacterProfile');
 
     function rarityClass(rareza) {
       return `rare-${rareza.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')}`;
@@ -1107,8 +1140,185 @@
       }, {});
     }
 
+    function normalizeEntityName(name) {
+      return String(name || '')
+        .trim()
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '');
+    }
+
+    function createModelId(prefix, value) {
+      const base = cssSafe(String(value || '').trim() || `${prefix}-${Date.now()}`);
+      return `${prefix}-${base || Date.now()}`;
+    }
+
+    function createEmptyCollectionModel() {
+      return {
+        actors: [],
+        characters: [],
+        universes: [],
+        videos: []
+      };
+    }
+
+    function parseModelFromStorage(rawModel) {
+      if (!rawModel || typeof rawModel !== 'object') return null;
+      if (!Array.isArray(rawModel.actors) || !Array.isArray(rawModel.characters) || !Array.isArray(rawModel.universes) || !Array.isArray(rawModel.videos)) {
+        return null;
+      }
+      return {
+        actors: rawModel.actors.filter(Boolean).map(item => ({
+          id: String(item.id || ''),
+          name: String(item.name || 'Sin actor'),
+          characterIds: Array.isArray(item.characterIds) ? [...new Set(item.characterIds.filter(Boolean).map(String))] : []
+        })),
+        characters: rawModel.characters.filter(Boolean).map(item => ({
+          id: String(item.id || ''),
+          name: String(item.name || 'Sin personaje'),
+          actorIds: Array.isArray(item.actorIds) ? [...new Set(item.actorIds.filter(Boolean).map(String))] : [],
+          universeIds: Array.isArray(item.universeIds) ? [...new Set(item.universeIds.filter(Boolean).map(String))] : [],
+          videoIds: Array.isArray(item.videoIds) ? [...new Set(item.videoIds.filter(Boolean).map(String))] : [],
+          unlocked: Boolean(item.unlocked)
+        })),
+        universes: rawModel.universes.filter(Boolean).map(item => ({
+          id: String(item.id || ''),
+          name: String(item.name || 'Sin universo'),
+          characterIds: Array.isArray(item.characterIds) ? [...new Set(item.characterIds.filter(Boolean).map(String))] : []
+        })),
+        videos: rawModel.videos.filter(Boolean).map(item => ({
+          id: String(item.id || ''),
+          youtubeUrl: String(item.youtubeUrl || ''),
+          title: String(item.title || ''),
+          thumbnail: String(item.thumbnail || ''),
+          characterId: String(item.characterId || ''),
+          actorId: String(item.actorId || ''),
+          universeIds: Array.isArray(item.universeIds) ? [...new Set(item.universeIds.filter(Boolean).map(String))] : []
+        }))
+      };
+    }
+
+    function saveCollectionModel() {
+      localStorage.setItem(COLLECTION_MODEL_STORAGE_KEY, JSON.stringify(collectionModel));
+      scheduleCloudSync();
+    }
+
+    function loadCollectionModelFromStorage() {
+      try {
+        const raw = localStorage.getItem(COLLECTION_MODEL_STORAGE_KEY);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        return parseModelFromStorage(parsed);
+      } catch (_) {
+        return null;
+      }
+    }
+
+    function getOrCreateActor(model, actorName, actorMap) {
+      const normalized = normalizeEntityName(actorName || 'Sin actor');
+      if (actorMap.has(normalized)) return actorMap.get(normalized);
+      const actor = { id: createModelId('actor', normalized), name: (actorName || 'Sin actor').trim() || 'Sin actor', characterIds: [] };
+      model.actors.push(actor);
+      actorMap.set(normalized, actor);
+      return actor;
+    }
+
+    function getOrCreateCharacter(model, characterName, characterMap) {
+      const normalized = normalizeEntityName(characterName || 'Sin personaje');
+      if (characterMap.has(normalized)) return characterMap.get(normalized);
+      const character = { id: createModelId('character', normalized), name: (characterName || 'Sin personaje').trim() || 'Sin personaje', actorIds: [], universeIds: [], videoIds: [], unlocked: false };
+      model.characters.push(character);
+      characterMap.set(normalized, character);
+      return character;
+    }
+
+    function getOrCreateUniverse(model, universeName, universeMap) {
+      const normalized = normalizeEntityName(universeName || 'Sin universo');
+      if (universeMap.has(normalized)) return universeMap.get(normalized);
+      const universe = { id: createModelId('universe', normalized), name: (universeName || 'Sin universo').trim() || 'Sin universo', characterIds: [] };
+      model.universes.push(universe);
+      universeMap.set(normalized, universe);
+      return universe;
+    }
+
+    function linkActorCharacter(actorId, characterId, model = collectionModel) {
+      const actor = model.actors.find(item => item.id === actorId);
+      const character = model.characters.find(item => item.id === characterId);
+      if (!actor || !character) return;
+      if (!actor.characterIds.includes(characterId)) actor.characterIds.push(characterId);
+      if (!character.actorIds.includes(actorId)) character.actorIds.push(actorId);
+    }
+
+    function linkCharacterUniverse(characterId, universeId, model = collectionModel) {
+      const character = model.characters.find(item => item.id === characterId);
+      const universe = model.universes.find(item => item.id === universeId);
+      if (!character || !universe) return;
+      if (!character.universeIds.includes(universeId)) character.universeIds.push(universeId);
+      if (!universe.characterIds.includes(characterId)) universe.characterIds.push(characterId);
+    }
+
+    function addVideoAndUnlockCharacter(videoPayload, model = collectionModel) {
+      const video = {
+        id: String(videoPayload.id || `video-${Date.now()}`),
+        youtubeUrl: String(videoPayload.youtubeUrl || ''),
+        title: String(videoPayload.title || ''),
+        thumbnail: String(videoPayload.thumbnail || ''),
+        characterId: String(videoPayload.characterId || ''),
+        actorId: String(videoPayload.actorId || ''),
+        universeIds: Array.isArray(videoPayload.universeIds) ? [...new Set(videoPayload.universeIds.filter(Boolean).map(String))] : []
+      };
+      model.videos.push(video);
+      const character = model.characters.find(item => item.id === video.characterId);
+      if (character) {
+        if (!character.videoIds.includes(video.id)) character.videoIds.push(video.id);
+        character.unlocked = true;
+      }
+      return video;
+    }
+
+    function migrateLegacyVideosToModel(legacyVideos) {
+      const model = createEmptyCollectionModel();
+      const actorMap = new Map();
+      const characterMap = new Map();
+      const universeMap = new Map();
+
+      (legacyVideos || []).forEach((video, idx) => {
+        const actor = getOrCreateActor(model, video?.actor_de_doblaje || 'Sin actor', actorMap);
+        const character = getOrCreateCharacter(model, video?.personaje || 'Sin personaje', characterMap);
+        linkActorCharacter(actor.id, character.id, model);
+        const universeIds = getVideoUniverses(video).filter(Boolean).map((universeName) => {
+          const universe = getOrCreateUniverse(model, universeName, universeMap);
+          linkCharacterUniverse(character.id, universe.id, model);
+          return universe.id;
+        });
+        addVideoAndUnlockCharacter({
+          id: video?.id || `video-legacy-${idx + 1}`,
+          youtubeUrl: video?.url_youtube || video?.url_video || '',
+          title: video?.titulo || '',
+          thumbnail: video?.thumbnail || '',
+          characterId: character.id,
+          actorId: actor.id,
+          universeIds
+        }, model);
+      });
+      return model;
+    }
+
     function normalizeUniverseName(name) {
       return name.trim().toLowerCase();
+    }
+
+    function normalizeName(name) {
+      return String(name || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    }
+
+    function getCharacterIdByName(name) {
+      return cssSafe(normalizeName(name));
+    }
+
+    function getCharacterNameById(characterId) {
+      return [...new Set(VIDEOS.map(v => String(v.personaje || '').trim()).filter(Boolean))]
+        .find(name => getCharacterIdByName(name) === characterId) || '';
     }
 
     function createPlaceholderCover(name) {
@@ -1174,6 +1384,13 @@
     }
 
     function getCharactersByActor(actorName) {
+      const normalizedActor = normalizeEntityName(actorName);
+      const modelActor = collectionModel.actors.find(item => normalizeEntityName(item.name) === normalizedActor);
+      if (modelActor) {
+        return modelActor.characterIds
+          .map((characterId) => collectionModel.characters.find(character => character.id === characterId)?.name)
+          .filter(Boolean);
+      }
       return [...new Set(
         VIDEOS.filter(v => (v.actor_de_doblaje || 'Sin actor') === actorName)
           .map(v => v.personaje || 'Sin personaje')
@@ -1271,6 +1488,8 @@
 
     function saveVideos() {
       localStorage.setItem(VIDEOS_STORAGE_KEY, JSON.stringify(VIDEOS));
+      collectionModel = migrateLegacyVideosToModel(VIDEOS);
+      saveCollectionModel();
       scheduleCloudSync();
     }
 
@@ -1284,6 +1503,16 @@
       } catch (_) {
         VIDEOS.splice(0, VIDEOS.length);
       }
+    }
+
+    function hydrateModelWithFallback() {
+      const storedModel = loadCollectionModelFromStorage();
+      if (storedModel) {
+        collectionModel = storedModel;
+        return;
+      }
+      collectionModel = migrateLegacyVideosToModel(VIDEOS);
+      saveCollectionModel();
     }
 
     function initFirebase() {
@@ -1308,9 +1537,20 @@
           VIDEOS.splice(0, VIDEOS.length, ...data.videos.filter(video => video && typeof video === 'object'));
           localStorage.setItem(VIDEOS_STORAGE_KEY, JSON.stringify(VIDEOS));
         }
+        if (data.collectionModel && typeof data.collectionModel === 'object') {
+          const parsedModel = parseModelFromStorage(data.collectionModel);
+          if (parsedModel) {
+            collectionModel = parsedModel;
+            localStorage.setItem(COLLECTION_MODEL_STORAGE_KEY, JSON.stringify(collectionModel));
+          }
+        }
         if (data.blockedCharactersByActor && typeof data.blockedCharactersByActor === 'object') {
           state.blockedCharactersByActor = data.blockedCharactersByActor;
           localStorage.setItem(BLOCKED_CHARACTERS_STORAGE_KEY, JSON.stringify(state.blockedCharactersByActor));
+        }
+        if (!collectionModel.videos.length && VIDEOS.length) {
+          collectionModel = migrateLegacyVideosToModel(VIDEOS);
+          localStorage.setItem(COLLECTION_MODEL_STORAGE_KEY, JSON.stringify(collectionModel));
         }
       } catch (err) {
         console.warn('No se pudo leer Firebase, usando almacenamiento local.', err);
@@ -1326,6 +1566,7 @@
             updatedAt: Date.now(),
             universeNodes: state.universeNodes,
             videos: VIDEOS,
+            collectionModel,
             blockedCharactersByActor: state.blockedCharactersByActor
           });
         } catch (err) {
@@ -1739,8 +1980,8 @@
     function renderInicioView() {
       const universeMap = groupByUniverse();
       const totalUniverses = Object.keys(universeMap).length;
-      const totalVideos = VIDEOS.length;
-      const totalCharacters = new Set(
+      const totalVideos = collectionModel.videos.length || VIDEOS.length;
+      const totalCharacters = collectionModel.characters.length || new Set(
         VIDEOS.map(video => (video.personaje || '').trim()).filter(Boolean)
       ).size;
       const latestFromVideos = VIDEOS.slice(-6).reverse();
@@ -1780,11 +2021,15 @@
                 <h4>${video.titulo || `Transmisión #${index + 1}`}</h4>
                 <p class="muted">Universo: ${(Array.isArray(video.universo) ? video.universo[0] : video.universo) || 'Sin universo'}</p>
                 <p class="muted">Personaje: ${video.personaje || 'Sin personaje'}</p>
+                ${video.personaje ? `<button class="character-link" data-open-character="${video.personaje}">Ver perfil</button>` : ''}
               </article>
             `).join('')}
           </div>
         </section>
       `;
+      viewInicio.querySelectorAll('[data-open-character]').forEach((btn) => {
+        btn.addEventListener('click', () => openCharacterProfile(btn.dataset.openCharacter));
+      });
     }
 
     function renderUniverseView() {
@@ -1856,6 +2101,7 @@
                     <p class="meta"><small>Personaje:</small>${v.personaje || 'Pendiente'}</p>
                     <p class="meta"><small>Actor:</small>${v.actor_de_doblaje || 'Pendiente'}</p>
                     <span class="badge ${rarityClass(v.rareza || 'Común')}">${v.rareza || 'Común'}</span>
+                    <button type="button" class="character-link" data-open-character="${v.personaje || ''}">Perfil</button>
                   </div>
                 </article>
               `).join('') || '<p class="muted">No hay resultados con estos filtros.</p>'}
@@ -1994,6 +2240,14 @@
           openVideoDetail(videoId);
         });
       });
+      viewUniverse.querySelectorAll('[data-open-character]').forEach((btn) => {
+        btn.addEventListener('click', (event) => {
+          event.stopPropagation();
+          const characterName = btn.dataset.openCharacter;
+          if (!characterName) return;
+          openCharacterProfile(characterName);
+        });
+      });
 
     }
 
@@ -2094,76 +2348,145 @@
     }
 
     function openCharacterProfile(characterName) {
-      const videosByCharacter = VIDEOS.filter(v => (v.personaje || 'Sin personaje') === characterName);
-      const universes = [...new Set(videosByCharacter.flatMap(v => getVideoUniverses(v)).filter(Boolean))];
-      const actors = [...new Set(videosByCharacter.map(v => v.actor_de_doblaje || 'Sin actor').filter(Boolean))];
+      const characterId = getCharacterIdByName(characterName);
+      if (!characterId) return;
+      state.characterProfileId = characterId;
+      changeView('characterProfile');
+    }
 
-      const modal = document.createElement('section');
-      modal.className = 'detail-modal';
-      modal.innerHTML = `
-        <article class="detail-content">
-          <button class="detail-close neon-btn" id="closeCharacterProfile">✕ Cerrar</button>
-          <section class="hud-panel holo-card">
-            <h3 class="section-title detail-character">${characterName}</h3>
-            <p class="section-subtitle">Perfil del personaje con universos y actores asociados.</p>
-            <div class="detail-grid">
-              <article>
-                <h4 class="section-title">Universos</h4>
-                <ul id="characterUniverseList" class="detail-list terminal-list">
-                  ${universes.map(name => `<li>${name}</li>`).join('') || '<li>Sin universos</li>'}
-                </ul>
-                <div class="actions">
-                  <input id="characterUniverseInput" type="text" placeholder="Agregar universo al personaje">
-                  <button id="addCharacterUniverse" class="neon-btn">Agregar universo</button>
-                </div>
-              </article>
-              <article>
-                <h4 class="section-title">Actores de doblaje asociados</h4>
-                <ul class="detail-list terminal-list">
-                  ${actors.map(name => `<li>${name}</li>`).join('') || '<li>Sin actores</li>'}
-                </ul>
-              </article>
-            </div>
+    function refreshDependentViews() {
+      renderMapView();
+      renderActoresView();
+      if (state.universe) renderUniverseView();
+    }
+
+    function setCharacterProfileFeedback(message, type = 'success') {
+      const feedback = document.getElementById('characterProfileFeedback');
+      if (!feedback) return;
+      feedback.textContent = message || '';
+      feedback.style.color = type === 'error' ? '#ffb6b6' : '#9ff7c8';
+    }
+
+    function getCharacterProfileData(characterId) {
+      const characterName = getCharacterNameById(characterId);
+      const videos = VIDEOS.filter(v => getCharacterIdByName(v.personaje || '') === characterId);
+      const actors = [...new Set(videos.map(v => String(v.actor_de_doblaje || 'Sin actor').trim()).filter(Boolean))];
+      const universes = [...new Set(videos.flatMap(v => getVideoUniverses(v).map(name => String(name || '').trim())).filter(Boolean))];
+      const blockedActors = Object.entries(state.blockedCharactersByActor)
+        .filter(([actorName, blocked]) => blocked.some(item => normalizeName(item) === normalizeName(characterName))
+          && !videos.some(v => normalizeName(v.actor_de_doblaje) === normalizeName(actorName)))
+        .map(([actorName]) => actorName);
+      const status = blockedActors.length ? 'Bloqueado' : 'Desbloqueado';
+      return { characterName, videos, actors, universes, blockedActors, status };
+    }
+
+    function renderCharacterProfile(characterId) {
+      const { characterName, videos, actors, universes, blockedActors, status } = getCharacterProfileData(characterId);
+      if (!characterName) {
+        viewCharacterProfile.innerHTML = `
+          <section class="mock-shell">
+            <h2>Perfil no disponible</h2>
+            <p class="muted">El personaje solicitado no existe.</p>
+            <button id="backFromCharacterMissing" class="neon-btn">Volver al mapa</button>
           </section>
-        </article>
+        `;
+        document.getElementById('backFromCharacterMissing')?.addEventListener('click', () => changeView('map'));
+        return;
+      }
+      viewCharacterProfile.innerHTML = `
+        <section class="hud-panel holo-card profile-layout">
+          <div class="actions">
+            <button id="backFromCharacterProfile" class="neon-btn">← Volver</button>
+          </div>
+          <h2 class="section-title detail-character">${characterName}</h2>
+          <p class="profile-status">Estado:
+            <span class="status-pill ${status === 'Desbloqueado' ? 'unlocked' : 'locked'}">${status}</span>
+          </p>
+          ${blockedActors.length ? `<p class="section-note">Bloqueado para: ${blockedActors.join(', ')}.</p>` : ''}
+          <p id="characterProfileFeedback" class="inline-feedback" aria-live="polite"></p>
+          <article class="profile-section">
+            <h4>Actores asociados (${actors.length})</h4>
+            <ul class="detail-list terminal-list">${actors.map(name => `<li>${name}</li>`).join('') || '<li>Sin actores asociados.</li>'}</ul>
+            <div class="actions"><button id="addActorToCharacter" class="neon-btn">Agregar actor</button></div>
+          </article>
+          <article class="profile-section">
+            <h4>Universos asociados (${universes.length})</h4>
+            <ul class="detail-list terminal-list">${universes.map(name => `<li>${name}</li>`).join('') || '<li>Sin universos asociados.</li>'}</ul>
+            <div class="actions"><button id="addUniverseToCharacter" class="neon-btn">Agregar universo</button></div>
+          </article>
+          <article class="profile-section">
+            <h4>Videos asociados (${videos.length})</h4>
+            <ul class="detail-list terminal-list">
+              ${videos.map(item => `<li>${item.titulo || 'Sin título'} · ${item.actor_de_doblaje || 'Sin actor'} · ${(getVideoUniverses(item).join(', ') || 'Sin universo')}</li>`).join('') || '<li>Sin videos asociados.</li>'}
+            </ul>
+          </article>
+        </section>
       `;
-      document.body.appendChild(modal);
-      modal.addEventListener('click', (event) => {
-        if (event.target === modal) modal.remove();
-      });
-      modal.querySelector('#closeCharacterProfile')?.addEventListener('click', () => modal.remove());
-      modal.querySelector('#addCharacterUniverse')?.addEventListener('click', () => {
-        const input = modal.querySelector('#characterUniverseInput');
-        const newUniverse = String(input?.value || '').trim();
-        if (!newUniverse) return;
-        const existing = new Set(universes.map(item => item.toLowerCase()));
-        if (existing.has(newUniverse.toLowerCase())) {
-          input.value = '';
-          return;
+      document.getElementById('backFromCharacterProfile')?.addEventListener('click', () => changeView(state.universe ? 'universe' : 'map'));
+      document.getElementById('addActorToCharacter')?.addEventListener('click', () => {
+        const inputName = prompt(`Nombre del actor para ${characterName}:`, '');
+        if (inputName === null) return;
+        const actorName = inputName.trim();
+        if (!actorName) return setCharacterProfileFeedback('Debes ingresar un nombre de actor.', 'error');
+        const normalizedActor = normalizeName(actorName);
+        const existingActor = [...new Set(VIDEOS.map(v => String(v.actor_de_doblaje || '').trim()).filter(Boolean))]
+          .find(name => normalizeName(name) === normalizedActor);
+        if (videos.some(v => normalizeName(v.actor_de_doblaje) === normalizedActor)) {
+          return setCharacterProfileFeedback('Ese actor ya está vinculado al personaje.', 'error');
         }
-        videosByCharacter.forEach(item => {
-          const set = new Set(getVideoUniverses(item));
-          set.add(newUniverse);
-          item.universo = [...set];
+        const canonicalActor = existingActor || actorName;
+        const baseUniverses = universes.length ? universes : ['Sin universo'];
+        VIDEOS.push({
+          id: `video-${Date.now()}`,
+          titulo: `Vínculo actor-personaje: ${characterName}`,
+          universo: [...baseUniverses],
+          personaje: characterName,
+          actor_de_doblaje: canonicalActor,
+          url_youtube: '',
+          rareza: 'Común',
+          thumbnail: createPlaceholderCover(baseUniverses[0] || 'Universo')
         });
-        if (!videosByCharacter.length) {
+        unlockBlockedCharacterForActor(canonicalActor, characterName);
+        ensureUniverseNodes();
+        saveVideos();
+        refreshDependentViews();
+        renderCharacterProfile(characterId);
+        setCharacterProfileFeedback(existingActor ? 'Actor existente vinculado correctamente.' : 'Actor creado y vinculado correctamente.');
+      });
+      document.getElementById('addUniverseToCharacter')?.addEventListener('click', () => {
+        const inputName = prompt(`Nombre del universo para ${characterName}:`, '');
+        if (inputName === null) return;
+        const universeName = inputName.trim();
+        if (!universeName) return setCharacterProfileFeedback('Debes ingresar un nombre de universo.', 'error');
+        const normalizedUniverse = normalizeName(universeName);
+        const existingUniverse = [...new Set([...Object.keys(groupByUniverse()), ...state.universeNodes.map(node => node.name)])]
+          .find(name => normalizeName(name) === normalizedUniverse);
+        if (universes.some(name => normalizeName(name) === normalizedUniverse)) {
+          return setCharacterProfileFeedback('Ese universo ya está vinculado al personaje.', 'error');
+        }
+        const canonicalUniverse = existingUniverse || universeName;
+        if (videos.length) {
+          videos.forEach((item) => {
+            const list = getVideoUniverses(item);
+            if (!list.some(name => normalizeName(name) === normalizedUniverse)) item.universo = [...list, canonicalUniverse];
+          });
+        } else {
           VIDEOS.push({
             id: `video-${Date.now()}`,
             titulo: `Nuevo registro de ${characterName}`,
-            universo: [newUniverse],
+            universo: [canonicalUniverse],
             personaje: characterName,
             actor_de_doblaje: 'Sin actor',
             url_youtube: '',
             rareza: 'Común',
-            thumbnail: createPlaceholderCover(newUniverse)
+            thumbnail: createPlaceholderCover(canonicalUniverse)
           });
         }
         ensureUniverseNodes();
         saveVideos();
-        renderMapView();
-        renderUniverseView();
-        modal.remove();
-        openCharacterProfile(characterName);
+        refreshDependentViews();
+        renderCharacterProfile(characterId);
+        setCharacterProfileFeedback(existingUniverse ? 'Universo existente vinculado correctamente.' : 'Universo creado y vinculado correctamente.');
       });
     }
 
@@ -2219,10 +2542,13 @@
           <h2>Índice de Personajes</h2>
           <input type="search" placeholder="Filtrar personaje en terminal..." aria-label="Buscar personaje en índice">
           <ul class="terminal-list">
-            ${indexItems.map(item => `<li>> ${item.personaje} · ${item.versions.length} versión(es)</li>`).join('') || '<li>> Sin personajes cargados</li>'}
+            ${indexItems.map(item => `<li><button type="button" class="character-link" data-open-character="${item.personaje}">> ${item.personaje}</button> · ${item.versions.length} versión(es)</li>`).join('') || '<li>> Sin personajes cargados</li>'}
           </ul>
         </section>
       `;
+      viewIndice.querySelectorAll('[data-open-character]').forEach((btn) => {
+        btn.addEventListener('click', () => openCharacterProfile(btn.dataset.openCharacter));
+      });
     }
 
     function renderMaratonView() {
@@ -2262,13 +2588,15 @@
     }
 
     function renderActoresView() {
-      const normalized = getNormalizedActorsData();
-      const actors = normalized.actors;
-      const actor = state.actorFocus || actors[0]?.name || null;
-      const actorData = actors.find((item) => item.name === actor) || null;
-      const unlockedCharacters = actorData ? actorData.characters.filter((item) => item.unlocked) : [];
-      const blockedCharacters = actorData ? actorData.characters.filter((item) => !item.unlocked) : [];
-      const actorVideos = actorData ? unlockedCharacters.reduce((acc, item) => acc + item.videos, 0) : 0;
+      const actors = (collectionModel.actors.length
+        ? collectionModel.actors.map(item => item.name)
+        : [...new Set(VIDEOS.map(v => v.actor_de_doblaje).filter(Boolean))]
+      ).sort();
+      const actor = state.actorFocus || actors[0] || null;
+      const actorVideos = VIDEOS.filter(v => (v.actor_de_doblaje || 'Sin actor') === actor);
+      const actorCharacters = [...new Set(actorVideos.map(v => v.personaje || 'Sin personaje'))];
+      const blockedCharacters = state.blockedCharactersByActor[actor] || [];
+      const blockedOnly = blockedCharacters.filter(name => !actorCharacters.includes(name));
       viewActores.innerHTML = `
         <section class="mock-shell holo-card">
           <h2>Colección del actor</h2>
@@ -2284,9 +2612,8 @@
             </article>
             <div class="mock-row">
               <article class="mock-box">
-                <h3>Personajes desbloqueados</h3>
-                <p class="section-note">Desbloqueados ${unlockedCharacters.length} / Bloqueados ${blockedCharacters.length}</p>
-                <ul>${unlockedCharacters.map(item => `<li>${item.name}${item.videos > 1 ? ` · ${item.videos} videos` : ''}</li>`).join('') || '<li>Sin personajes desbloqueados.</li>'}</ul>
+                <h3>Personajes con saludo</h3>
+                <ul>${actorCharacters.map(name => `<li><button type="button" class="character-link" data-open-character="${name}">${name}</button></li>`).join('') || '<li>Sin personajes con saludo.</li>'}</ul>
               </article>
               <article class="mock-box">
                 <h3>Personajes bloqueados</h3>
@@ -2321,6 +2648,9 @@
         state.blockedCharactersByActor[actor] = [...new Set([...current, characterName])];
         saveBlockedCharacters();
         renderActoresView();
+      });
+      viewActores.querySelectorAll('[data-open-character]').forEach((btn) => {
+        btn.addEventListener('click', () => openCharacterProfile(btn.dataset.openCharacter));
       });
     }
 
@@ -2462,6 +2792,7 @@
       viewBuscar.classList.toggle('active', next === 'buscar');
       viewStats.classList.toggle('active', next === 'stats');
       viewConfig.classList.toggle('active', next === 'config');
+      viewCharacterProfile.classList.toggle('active', next === 'characterProfile');
       document.querySelectorAll('.sidebar-nav .sidebar-item').forEach(btn => btn.classList.remove('active'));
       const activeNavByView = {
         inicio: navInicio,
@@ -2476,7 +2807,8 @@
         favoritos: navFavoritos,
         buscar: navBuscar,
         stats: navStats,
-        config: navConfig
+        config: navConfig,
+        characterProfile: navUniverses
       };
       activeNavByView[next]?.classList.add('active');
 
@@ -2493,6 +2825,7 @@
       if (next === 'buscar') renderBuscarView();
       if (next === 'stats') renderStatsView();
       if (next === 'config') renderConfigView();
+      if (next === 'characterProfile') renderCharacterProfile(state.characterProfileId);
     }
 
     toggleSidebar.onclick = () => {
@@ -2515,11 +2848,13 @@
 
     state.universeNodes = loadUniverseNodesFromStorage();
     loadVideosFromStorage();
+    hydrateModelWithFallback();
     state.blockedCharactersByActor = loadBlockedCharactersFromStorage();
 
     (async () => {
       initFirebase();
       await loadFromFirebase();
+      hydrateModelWithFallback();
       changeView('map');
     })();
   </script>
