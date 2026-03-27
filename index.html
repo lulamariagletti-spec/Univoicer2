@@ -3489,10 +3489,13 @@
       `;
     }
 
-    function renderCharacterProfile(characterId) {
+    function openCharacterProfileFromCollectionCard(characterId) {
       const entry = getGlobalCharacterCollection().find(item => item.id === characterId);
       if (!entry || !entry.unlocked) return;
-      openCharacterProfile(entry.name);
+      const profileId = getCharacterIdByName(entry.name);
+      if (!profileId) return;
+      state.characterProfileId = profileId;
+      changeView('characterProfile');
     }
 
     function renderCollectionView() {
@@ -3559,7 +3562,7 @@
         card.addEventListener('click', () => {
           const { characterId } = card.dataset;
           if (!characterId) return;
-          renderCharacterProfile(characterId);
+          openCharacterProfileFromCollectionCard(characterId);
         });
       });
     }
@@ -3703,8 +3706,11 @@
       const universeNameMap = new Map((collectionModel.universes || [])
         .map(item => [normalizeEntityName(item.name), item.name]));
       actorNames.forEach((actorName, idx) => {
-        const canonicalActorName = actorNameMap.get(normalizeEntityName(actorName)) || actorName;
-        const canonicalUniverse = universeNameMap.get(normalizeEntityName(selectedUniverse)) || selectedUniverse;
+        const actor = getOrCreateActor(collectionModel, actorName, actorMap);
+        const character = getOrCreateCharacter(collectionModel, characterName, characterMap);
+        const universe = getOrCreateUniverse(collectionModel, selectedUniverse, universeMap);
+        linkActorCharacter(actor.id, character.id, collectionModel);
+        linkCharacterUniverse(character.id, universe.id, collectionModel);
         VIDEOS.push({
           id: `video-${Date.now()}-${idx}`,
           titulo: `Registro de ${characterName}`,
