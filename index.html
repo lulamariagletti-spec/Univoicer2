@@ -1789,7 +1789,6 @@
         nodeScale: 1,
         isDragging: false,
         dragMoved: false,
-        suppressClickUntil: 0,
         lastPointerX: 0,
         lastPointerY: 0
       },
@@ -2770,7 +2769,7 @@
       });
 
       mapWorld.addEventListener('click', (event) => {
-        if (Date.now() < state.mapCamera.suppressClickUntil || event.target.closest('.universe-node')) return;
+        if (state.mapCamera.dragMoved || event.target.closest('.universe-node')) return;
         event.stopPropagation();
         const rect = mapCanvas.getBoundingClientRect();
         openPopupAt(event.clientX - rect.left, event.clientY - rect.top);
@@ -2799,11 +2798,8 @@
       });
 
       const endDrag = () => {
-        if (state.mapCamera.dragMoved) {
-          state.mapCamera.suppressClickUntil = Date.now() + 160;
-        }
         state.mapCamera.isDragging = false;
-        state.mapCamera.dragMoved = false;
+        setTimeout(() => { state.mapCamera.dragMoved = false; }, 0);
         mapShell.classList.remove('is-dragging');
       };
       mapShell.addEventListener('pointerup', endDrag);
