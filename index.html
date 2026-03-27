@@ -389,13 +389,16 @@
       box-shadow:
         0 18px 34px rgba(4, 8, 22, .45),
         inset 0 0 0 1px rgba(176, 220, 255, .14);
-      overflow: auto;
+      overflow: hidden;
       background:
         radial-gradient(circle at 12% 12%, rgba(81, 194, 255, .12), transparent 34%),
         radial-gradient(circle at 88% 16%, rgba(176, 110, 255, .12), transparent 32%),
         rgba(6, 11, 24, 0.95);
       scroll-behavior: smooth;
+      cursor: grab;
+      user-select: none;
     }
+    .universe-map-shell.is-dragging { cursor: grabbing; }
 
     #universeMapCanvas {
       position: relative;
@@ -448,11 +451,16 @@
       min-width: 100%;
       min-height: 100%;
       z-index: 2;
+      transform-origin: 0 0;
+      transition: transform .2s ease;
+      will-change: transform;
     }
+    .universe-map-shell.is-dragging .map-world { transition: none; }
 
     .universe-node {
       --w: 220px;
       --h: 186px;
+      --node-scale: 1;
       position: absolute;
       width: var(--w);
       height: var(--h);
@@ -460,12 +468,22 @@
       box-shadow: none;
       overflow: visible;
       background: transparent;
-      transition: transform .25s ease, filter .25s ease;
+      transition: left .36s ease, top .36s ease, transform .25s ease, filter .25s ease, opacity .35s ease;
       z-index: 2;
       cursor: pointer;
       padding: 0;
       animation: nodeFloat 5.8s ease-in-out infinite;
       animation-delay: var(--float-delay, 0s);
+    }
+    .universe-node.is-entering {
+      animation:
+        nodePopIn .42s cubic-bezier(.2,.8,.2,1),
+        nodeFloat 5.8s ease-in-out infinite;
+      animation-delay: 0s, var(--float-delay, 0s);
+    }
+    @keyframes nodePopIn {
+      from { opacity: 0; transform: translateY(10px) scale(.72); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
     }
 
     .universe-node::before {
@@ -514,10 +532,10 @@
 
     .island-base {
       position: absolute;
-      left: 8px;
-      right: 8px;
-      bottom: 20px;
-      height: 92px;
+      left: calc(8px * var(--node-scale));
+      right: calc(8px * var(--node-scale));
+      bottom: calc(20px * var(--node-scale));
+      height: calc(92px * var(--node-scale));
       border-radius: inherit;
       border: 1px solid rgba(154, 207, 255, .3);
       background:
@@ -540,11 +558,11 @@
 
     .universe-node .universe-cover {
       position: absolute;
-      top: 10px;
+      top: calc(10px * var(--node-scale));
       left: 50%;
       transform: translateX(-50%);
-      width: 116px;
-      height: 116px;
+      width: calc(116px * var(--node-scale));
+      height: calc(116px * var(--node-scale));
       object-fit: cover;
       filter: saturate(1.1) contrast(1.04);
       border-radius: 14px;
@@ -556,11 +574,11 @@
 
     .universe-node .cover-fallback {
       position: absolute;
-      top: 10px;
+      top: calc(10px * var(--node-scale));
       left: 50%;
       transform: translateX(-50%);
-      width: 116px;
-      height: 116px;
+      width: calc(116px * var(--node-scale));
+      height: calc(116px * var(--node-scale));
       display: none;
       border-radius: 14px;
       border: 1px solid rgba(154, 205, 255, .55);
@@ -579,12 +597,12 @@
 
     .universe-node .node-info {
       position: absolute;
-      left: 16px;
-      right: 16px;
-      bottom: 32px;
+      left: calc(16px * var(--node-scale));
+      right: calc(16px * var(--node-scale));
+      bottom: calc(32px * var(--node-scale));
       z-index: 3;
       text-align: center;
-      padding: 8px 10px;
+      padding: calc(8px * var(--node-scale)) calc(10px * var(--node-scale));
       border-radius: 12px;
       border: 1px solid rgba(115, 201, 255, .62);
       background: linear-gradient(145deg, rgba(11, 24, 48, .76), rgba(17, 21, 42, .74));
@@ -595,7 +613,7 @@
 
     .universe-node h3 {
       margin: 0;
-      font-size: .88rem;
+      font-size: calc(.88rem * var(--node-scale));
       color: #eff7ff;
       text-shadow: 0 2px 10px rgba(0, 0, 0, .82);
       letter-spacing: .03em;
@@ -665,7 +683,7 @@
 
     .universe-node p {
       margin: 4px 0 0;
-      font-size: .74rem;
+      font-size: calc(.74rem * var(--node-scale));
       color: #d4e9ff;
       text-shadow: 0 2px 10px rgba(0, 0, 0, .8);
       letter-spacing: .06em;
@@ -1762,6 +1780,18 @@
       marathon: { active: false, queue: [], position: 0 },
       universeNodes: [],
       mapCanvas: { width: 1400, height: 900 },
+      mapCamera: {
+        x: 0,
+        y: 0,
+        zoom: 1,
+        minZoom: 0.6,
+        maxZoom: 2.8,
+        nodeScale: 1,
+        isDragging: false,
+        dragMoved: false,
+        lastPointerX: 0,
+        lastPointerY: 0
+      },
       blockedCharactersByActor: {},
       characterProfileId: null,
       indiceSearch: '',
@@ -2428,20 +2458,57 @@
     }
 
     function recalculateMapCanvasSize(viewportWidth = 0, viewportHeight = 0) {
-      const padding = 180;
-      const minWidth = Math.max(1200, viewportWidth + 180);
-      const minHeight = Math.max(760, viewportHeight + 180);
+      const minWidth = Math.max(960, viewportWidth || 0);
+      const minHeight = Math.max(620, viewportHeight || 0);
+      state.mapCanvas.width = minWidth;
+      state.mapCanvas.height = minHeight;
+    }
+
+    function recenterUniverseNodes() {
+      if (!state.universeNodes.length) return;
+      const centerX = state.universeNodes.reduce((sum, node) => sum + node.x, 0) / state.universeNodes.length;
+      const centerY = state.universeNodes.reduce((sum, node) => sum + node.y, 0) / state.universeNodes.length;
+      state.universeNodes = state.universeNodes.map(node => ({
+        ...node,
+        x: Math.round(node.x - centerX),
+        y: Math.round(node.y - centerY)
+      }));
+    }
+
+    function getDynamicNodeScale() {
+      const count = Math.max(1, state.universeNodes.length);
+      return Math.max(0.52, Math.min(1.08, 1.08 - ((count - 1) * 0.03)));
+    }
+
+    function getUniverseLogicalBounds() {
       if (!state.universeNodes.length) {
-        state.mapCanvas.width = minWidth;
-        state.mapCanvas.height = minHeight;
-        return;
+        return { minX: -NODE_HALF_WIDTH, maxX: NODE_HALF_WIDTH, minY: -NODE_HALF_HEIGHT, maxY: NODE_HALF_HEIGHT };
       }
       const xs = state.universeNodes.map(node => node.x);
       const ys = state.universeNodes.map(node => node.y);
-      const maxX = Math.max(...xs) + NODE_HALF_WIDTH + padding;
-      const maxY = Math.max(...ys) + NODE_HALF_HEIGHT + padding;
-      state.mapCanvas.width = Math.max(minWidth, maxX);
-      state.mapCanvas.height = Math.max(minHeight, maxY);
+      return {
+        minX: Math.min(...xs) - NODE_HALF_WIDTH,
+        maxX: Math.max(...xs) + NODE_HALF_WIDTH,
+        minY: Math.min(...ys) - NODE_HALF_HEIGHT,
+        maxY: Math.max(...ys) + NODE_HALF_HEIGHT
+      };
+    }
+
+    function getFitZoom(shellWidth, shellHeight) {
+      const bounds = getUniverseLogicalBounds();
+      const mapPadding = 140;
+      const width = Math.max(1, bounds.maxX - bounds.minX + mapPadding * 2);
+      const height = Math.max(1, bounds.maxY - bounds.minY + mapPadding * 2);
+      const scaledWidth = width * state.mapCamera.nodeScale;
+      const scaledHeight = height * state.mapCamera.nodeScale;
+      const safeWidth = Math.max(240, shellWidth - 24);
+      const safeHeight = Math.max(220, shellHeight - 24);
+      const fitZoom = Math.min(safeWidth / scaledWidth, safeHeight / scaledHeight);
+      return Math.max(0.25, Math.min(fitZoom, 1.35));
+    }
+
+    function applyMapCameraTransform(mapWorld) {
+      mapWorld.style.transform = `translate(${state.mapCamera.x}px, ${state.mapCamera.y}px) scale(${state.mapCamera.zoom})`;
     }
 
     function ensureUniverseNodes() {
@@ -2509,17 +2576,21 @@
           node.cover = createPlaceholderCover(node.name);
         }
       });
+      recenterUniverseNodes();
       saveUniverseNodes();
     }
 
     function renderMapView() {
       const universes = groupByUniverse();
       ensureUniverseNodes();
+      state.mapCamera.nodeScale = getDynamicNodeScale();
+      const nodeHalfWidth = (220 * state.mapCamera.nodeScale) / 2;
+      const nodeHalfHeight = (186 * state.mapCamera.nodeScale) / 2;
       const nodesMarkup = state.universeNodes.map(node => {
         const universeData = universes[node.name] || { totalCharacters: 0, unlockedCharacters: 0, completion: 0, state: 'incomplete' };
         const floatDelay = ((Math.abs(hashCode(node.id)) % 24) / 10).toFixed(1);
         return `
-          <button class="universe-node" data-node-id="${node.id}" data-open="${node.name}" style="left:${node.x - NODE_HALF_WIDTH}px; top:${node.y - NODE_HALF_HEIGHT}px; border-radius:${node.shape}; --float-delay:-${floatDelay}s;">
+          <button class="universe-node ${node.isNew ? 'is-entering' : ''}" data-node-id="${node.id}" data-open="${node.name}" style="left:${(state.mapCanvas.width / 2) + node.x - nodeHalfWidth}px; top:${(state.mapCanvas.height / 2) + node.y - nodeHalfHeight}px; border-radius:${node.shape}; --float-delay:-${floatDelay}s; --w:${Math.round(220 * state.mapCamera.nodeScale)}px; --h:${Math.round(186 * state.mapCamera.nodeScale)}px; --node-scale:${state.mapCamera.nodeScale.toFixed(3)};">
             <span class="island-base" style="border-radius:${node.shape};"></span>
             <img class="universe-cover" src="${getSafeUniverseCover(node.name, node.cover)}" alt="Portada de ${node.name}" loading="lazy">
             <span class="cover-fallback">Portada no disponible</span>
@@ -2546,7 +2617,7 @@
               ${nodesMarkup}
             </div>
           </div>
-        </section>
+        </div>
       `;
 
       const mapCanvas = document.getElementById('universeMapCanvas');
@@ -2562,6 +2633,13 @@
         mapCanvas.style.height = `${state.mapCanvas.height}px`;
         mapWorld.style.width = `${state.mapCanvas.width}px`;
         mapWorld.style.height = `${state.mapCanvas.height}px`;
+        state.mapCamera.nodeScale = getDynamicNodeScale();
+        state.mapCamera.minZoom = getFitZoom(state.mapCanvas.width, state.mapCanvas.height);
+        state.mapCamera.maxZoom = Math.max(state.mapCamera.minZoom + 0.5, 3.2);
+        state.mapCamera.zoom = Math.max(state.mapCamera.minZoom, Math.min(state.mapCamera.zoom, state.mapCamera.maxZoom));
+        state.mapCamera.x = (state.mapCanvas.width / 2) - ((state.mapCanvas.width / 2) * state.mapCamera.zoom);
+        state.mapCamera.y = (state.mapCanvas.height / 2) - ((state.mapCanvas.height / 2) * state.mapCamera.zoom);
+        applyMapCameraTransform(mapWorld);
       };
       syncMapCanvasSize();
 
@@ -2598,7 +2676,7 @@
           </form>
         `;
         popup.addEventListener('click', (event) => event.stopPropagation());
-        mapWorld.appendChild(popup);
+        mapCanvas.appendChild(popup);
         setTimeout(() => document.addEventListener('click', closePopup, { once: true }), 0);
 
         const form = popup.querySelector('#mapCreateForm');
@@ -2650,9 +2728,11 @@
             return;
           }
 
-          const boundedX = Math.max(NODE_HALF_WIDTH, Math.min(Math.round(x), state.mapCanvas.width - NODE_HALF_WIDTH));
-          const boundedY = Math.max(NODE_HALF_HEIGHT, Math.min(Math.round(y), state.mapCanvas.height - NODE_HALF_HEIGHT));
-          const adjusted = resolveNodeCollision(boundedX, boundedY, state.universeNodes);
+          const worldX = (x - state.mapCamera.x) / state.mapCamera.zoom;
+          const worldY = (y - state.mapCamera.y) / state.mapCamera.zoom;
+          const logicalX = Math.round(worldX - (state.mapCanvas.width / 2));
+          const logicalY = Math.round(worldY - (state.mapCanvas.height / 2));
+          const adjusted = resolveNodeCollision(logicalX, logicalY, state.universeNodes);
           state.universeNodes.push({
             id: cssSafe(`${name}-${Date.now()}`),
             name,
@@ -2660,9 +2740,10 @@
             x: adjusted.x,
             y: adjusted.y,
             neighbors: [],
-            shape: createNodeShape(hashCode(name))
+            shape: createNodeShape(hashCode(name)),
+            isNew: true
           });
-          syncMapCanvasSize();
+          recenterUniverseNodes();
           saveUniverseNodes();
           closePopup();
           renderMapView();
@@ -2688,11 +2769,61 @@
       });
 
       mapWorld.addEventListener('click', (event) => {
+        if (state.mapCamera.dragMoved || event.target.closest('.universe-node')) return;
         event.stopPropagation();
-        const rect = mapWorld.getBoundingClientRect();
+        const rect = mapCanvas.getBoundingClientRect();
         openPopupAt(event.clientX - rect.left, event.clientY - rect.top);
       });
 
+      mapShell.addEventListener('pointerdown', (event) => {
+        if (event.button !== 0 || event.target.closest('.universe-node') || event.target.closest('.map-popup')) return;
+        state.mapCamera.isDragging = true;
+        state.mapCamera.dragMoved = false;
+        state.mapCamera.lastPointerX = event.clientX;
+        state.mapCamera.lastPointerY = event.clientY;
+        mapShell.setPointerCapture(event.pointerId);
+        mapShell.classList.add('is-dragging');
+      });
+
+      mapShell.addEventListener('pointermove', (event) => {
+        if (!state.mapCamera.isDragging) return;
+        const dx = event.clientX - state.mapCamera.lastPointerX;
+        const dy = event.clientY - state.mapCamera.lastPointerY;
+        if (Math.abs(dx) + Math.abs(dy) > 2) state.mapCamera.dragMoved = true;
+        state.mapCamera.x += dx;
+        state.mapCamera.y += dy;
+        state.mapCamera.lastPointerX = event.clientX;
+        state.mapCamera.lastPointerY = event.clientY;
+        applyMapCameraTransform(mapWorld);
+      });
+
+      const endDrag = () => {
+        state.mapCamera.isDragging = false;
+        setTimeout(() => { state.mapCamera.dragMoved = false; }, 0);
+        mapShell.classList.remove('is-dragging');
+      };
+      mapShell.addEventListener('pointerup', endDrag);
+      mapShell.addEventListener('pointercancel', endDrag);
+
+      mapShell.addEventListener('wheel', (event) => {
+        event.preventDefault();
+        const rect = mapShell.getBoundingClientRect();
+        const px = event.clientX - rect.left;
+        const py = event.clientY - rect.top;
+        const wheelStep = event.deltaY < 0 ? 1.1 : 0.9;
+        const oldZoom = state.mapCamera.zoom;
+        const nextZoom = Math.max(state.mapCamera.minZoom, Math.min(oldZoom * wheelStep, state.mapCamera.maxZoom));
+        if (nextZoom === oldZoom) return;
+        const worldX = (px - state.mapCamera.x) / oldZoom;
+        const worldY = (py - state.mapCamera.y) / oldZoom;
+        state.mapCamera.zoom = nextZoom;
+        state.mapCamera.x = px - (worldX * nextZoom);
+        state.mapCamera.y = py - (worldY * nextZoom);
+        applyMapCameraTransform(mapWorld);
+      }, { passive: false });
+
+      state.universeNodes.forEach(node => { if (node.isNew) delete node.isNew; });
+      saveUniverseNodes();
       window.addEventListener('resize', syncMapCanvasSize, { once: true });
     }
 
