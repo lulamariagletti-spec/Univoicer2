@@ -1998,13 +1998,124 @@
     .index-row:hover { border-color: color-mix(in srgb, var(--accent) 40%, white); transform: translateY(-1px); box-shadow: var(--shadow-soft); }
 
     .marathon {
-      margin-top: 10px;
-      padding: 10px 12px;
+      display: grid;
+      gap: 12px;
+      padding: 16px;
+      border-radius: 16px;
+      border: 1px solid rgba(112, 202, 255, .42);
+      background: linear-gradient(165deg, rgba(8, 23, 48, .95), rgba(12, 33, 66, .9));
+      box-shadow: var(--shadow-soft);
+      min-height: 0;
+    }
+    .marathon-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .marathon-title {
+      margin: 0;
+      letter-spacing: .08em;
+      font-size: clamp(1.3rem, 1.1rem + .6vw, 1.9rem);
+    }
+    .marathon-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1.7fr) minmax(240px, 1fr);
+      gap: 12px;
+      min-height: 0;
+    }
+    .marathon-main {
+      display: grid;
+      gap: 10px;
+      min-height: 0;
+    }
+    .marathon-player-shell {
       border-radius: 12px;
-      background: color-mix(in srgb, var(--focus) 20%, #081329);
-      color: #8ceeff;
-      border: 1px solid color-mix(in srgb, var(--focus) 44%, #07101e);
-      font-size: .9rem;
+      overflow: hidden;
+      border: 1px solid rgba(109, 201, 255, .3);
+      background: rgba(3, 9, 21, .75);
+    }
+    .marathon-controls {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .marathon-controls .neon-btn {
+      width: 100%;
+      min-height: 42px;
+    }
+    .marathon-side {
+      border: 1px solid rgba(112, 202, 255, .3);
+      border-radius: 12px;
+      padding: 10px;
+      background: rgba(5, 14, 32, .72);
+      display: grid;
+      gap: 8px;
+      min-height: 0;
+    }
+    .marathon-playlist-label {
+      margin: 0;
+      color: #b4dcff;
+      font-size: .85rem;
+      text-transform: uppercase;
+      letter-spacing: .05em;
+    }
+    .marathon-list {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      display: grid;
+      gap: 6px;
+      overflow: auto;
+      min-height: 0;
+      max-height: 420px;
+    }
+    .marathon-item-btn {
+      width: 100%;
+      text-align: left;
+      border-radius: 10px;
+      border: 1px solid rgba(123, 188, 240, .3);
+      background: rgba(10, 26, 53, .84);
+      color: var(--text);
+      padding: 8px 10px;
+      display: grid;
+      gap: 2px;
+      cursor: pointer;
+      transition: border-color .2s ease, transform .2s ease, background .2s ease;
+    }
+    .marathon-item-btn:hover {
+      transform: translateY(-1px);
+      border-color: rgba(147, 221, 255, .7);
+    }
+    .marathon-item-btn.active {
+      border-color: rgba(111, 246, 255, .95);
+      background: linear-gradient(150deg, rgba(20, 54, 95, .98), rgba(28, 64, 118, .95));
+      box-shadow: 0 0 0 1px rgba(43, 247, 255, .35);
+    }
+    .marathon-item-btn small {
+      color: var(--muted);
+      font-size: .78rem;
+    }
+    .marathon-empty {
+      border: 1px dashed rgba(123, 188, 240, .28);
+      border-radius: 10px;
+      padding: 14px;
+      color: var(--muted);
+      background: rgba(5, 14, 32, .4);
+    }
+    @media (max-width: 1040px) {
+      .marathon-layout {
+        grid-template-columns: 1fr;
+      }
+      .marathon-list {
+        max-height: 260px;
+      }
+    }
+    @media (max-width: 680px) {
+      .marathon-controls {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
     }
 
     details { margin-top: 10px; }
@@ -3691,6 +3802,13 @@
               <span class="sidebar-hint">Talentos de voz</span>
             </span>
           </button>
+          <button id="navMaraton" class="sidebar-item">
+            <span class="sidebar-item-icon" aria-hidden="true">🏃‍♂️</span>
+            <span class="sidebar-item-text">
+              <span class="sidebar-label">MARATÓN</span>
+              <span class="sidebar-hint">Playlist galáctica</span>
+            </span>
+          </button>
           <button id="navIndice" class="sidebar-item">
             <span class="sidebar-item-icon" aria-hidden="true">📚</span>
             <span class="sidebar-item-text">
@@ -3730,6 +3848,12 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-database-compat.js"></script>
   <script>
     const VIDEOS = [];
+    let AUTO_MARATHON_PLAYLIST = Object.freeze({
+      id: 'auto-todos',
+      name: 'Auto • Todos los personajes',
+      source: 'auto',
+      videoIds: Object.freeze([])
+    });
     const firebaseConfig = {
       apiKey: 'AIzaSyD7Hn2RHrDQRlUB-XcPtsDQ8WzWQ-q426Y',
       authDomain: 'univoicer-580d6.firebaseapp.com',
@@ -3755,7 +3879,14 @@
       universeAddMode: 'video',
       showEditUniverseForm: false,
       editUniverseFeedback: { type: '', text: '' },
-      marathon: { active: false, queue: [], position: 0, history: [], shuffleEnabled: false, finished: false },
+      marathon: {
+        playlists: [],
+        activePlaylistId: 'auto',
+        queue: [],
+        position: 0,
+        isPlaying: false,
+        shuffleEnabled: false
+      },
       universeNodes: [],
       mapCanvas: { width: 1400, height: 900 },
       mapViewport: { scale: 1, centroidX: 0, centroidY: 0 },
@@ -3801,6 +3932,7 @@
     const navUniverses = document.getElementById('navUniverses');
     const navIndice = document.getElementById('navIndice');
     const navActores = document.getElementById('navActores');
+    const navMaraton = document.getElementById('navMaraton');
     const viewInicio = document.getElementById('viewInicio');
     const viewMap = document.getElementById('viewMap');
     const viewUniverse = document.getElementById('viewUniverse');
@@ -4483,6 +4615,7 @@
       localStorage.setItem(VIDEOS_STORAGE_KEY, JSON.stringify(VIDEOS));
       collectionModel = mergeModelWithLegacyVideos(collectionModel, VIDEOS);
       saveCollectionModel();
+      buildAutoMarathonPlaylist();
       scheduleCloudSync();
       renderMapView();
     }
@@ -4490,13 +4623,16 @@
     function loadVideosFromStorage() {
       try {
         const raw = localStorage.getItem(VIDEOS_STORAGE_KEY);
-        if (!raw) return;
-        const parsed = JSON.parse(raw);
-        if (!Array.isArray(parsed)) return;
-        VIDEOS.splice(0, VIDEOS.length, ...parsed.filter(video => video && typeof video === 'object'));
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            VIDEOS.splice(0, VIDEOS.length, ...parsed.filter(video => video && typeof video === 'object'));
+          }
+        }
       } catch (_) {
         VIDEOS.splice(0, VIDEOS.length);
       }
+      buildAutoMarathonPlaylist();
     }
 
     function hydrateModelWithFallback() {
@@ -4521,7 +4657,10 @@
       try {
         const snapshot = await firebaseDb.ref(CLOUD_STORAGE_PATH).get();
         const data = snapshot.val();
-        if (!data || typeof data !== 'object') return;
+        if (!data || typeof data !== 'object') {
+          buildAutoMarathonPlaylist();
+          return;
+        }
 
         if (Array.isArray(data.universeNodes)) {
           state.universeNodes = mergeUniverseNodes(state.universeNodes, data.universeNodes);
@@ -4546,9 +4685,39 @@
           collectionModel = migrateLegacyVideosToModel(VIDEOS);
           localStorage.setItem(COLLECTION_MODEL_STORAGE_KEY, JSON.stringify(collectionModel));
         }
+        buildAutoMarathonPlaylist();
       } catch (err) {
         console.warn('No se pudo leer Firebase, usando almacenamiento local.', err);
+        buildAutoMarathonPlaylist();
       }
+    }
+
+    function buildAutoMarathonPlaylist() {
+      const sortedPlayableVideos = [...VIDEOS]
+        .filter((video) => Boolean(getYoutubeId(video?.url_youtube || '')))
+        .sort((a, b) => String(a?.personaje || '').localeCompare(String(b?.personaje || ''), 'es', { sensitivity: 'base' }));
+      AUTO_MARATHON_PLAYLIST = Object.freeze({
+        id: 'auto-todos',
+        name: 'Auto • Todos los personajes',
+        source: 'auto',
+        videoIds: Object.freeze(sortedPlayableVideos.map((video) => video.id))
+      });
+      state.marathon.playlists = [AUTO_MARATHON_PLAYLIST];
+      const playlistExists = state.marathon.playlists.some((playlist) => playlist.id === state.marathon.selectedPlaylistId);
+      if (!playlistExists) {
+        state.marathon.selectedPlaylistId = AUTO_MARATHON_PLAYLIST.id;
+      }
+      return AUTO_MARATHON_PLAYLIST;
+    }
+
+    function getMarathonQueue() {
+      const selectedPlaylistId = state.marathon.selectedPlaylistId || AUTO_MARATHON_PLAYLIST.id;
+      if (selectedPlaylistId === AUTO_MARATHON_PLAYLIST.id) {
+        return AUTO_MARATHON_PLAYLIST.videoIds
+          .map((videoId) => VIDEOS.find((video) => video.id === videoId))
+          .filter(Boolean);
+      }
+      return getFilteredUniverseVideos();
     }
 
     function scheduleCloudSync() {
@@ -5154,7 +5323,14 @@
           state.universe = nodeEl.dataset.open;
           state.selectedVideoId = null;
           state.showAddForm = false;
-          state.marathon = { active: false, queue: [], position: 0 };
+          state.marathon = {
+            playlists: [],
+            activePlaylistId: 'auto',
+            queue: [],
+            position: 0,
+            isPlaying: false,
+            shuffleEnabled: false
+          };
           state.filters = { personaje: 'todos', actor: 'todos', rareza: 'todos' };
           state.search = { personaje: '', actor: '' };
           changeView('universe');
@@ -6992,41 +7168,143 @@
       bindIndiceCharacterCardPreview(viewIndice.querySelectorAll('.character-gallery-card'), indexItems);
     }
 
+    function shuffleVideos(videos) {
+      const copy = [...videos];
+      for (let i = copy.length - 1; i > 0; i -= 1) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [copy[i], copy[j]] = [copy[j], copy[i]];
+      }
+      return copy;
+    }
+
+    function ensureMarathonState() {
+      const marathon = state.marathon;
+      const automaticQueue = getFilteredUniverseVideos();
+      const byUniverse = groupByUniverse();
+      const universePlaylists = Object.entries(byUniverse)
+        .filter(([, data]) => Array.isArray(data?.videos) && data.videos.length)
+        .map(([key, data]) => ({
+          id: `universe:${key}`,
+          name: data.name || key || 'Universo',
+          videos: data.videos.filter((video) => hasGreetingVideo(video))
+        }))
+        .filter((playlist) => playlist.videos.length);
+      marathon.playlists = [
+        {
+          id: 'auto',
+          name: 'Automática',
+          videos: automaticQueue.filter((video) => hasGreetingVideo(video))
+        },
+        ...universePlaylists
+      ];
+      if (!marathon.playlists.some((playlist) => playlist.id === marathon.activePlaylistId)) {
+        marathon.activePlaylistId = marathon.playlists[0]?.id || 'auto';
+      }
+      const activePlaylist = marathon.playlists.find((playlist) => playlist.id === marathon.activePlaylistId) || marathon.playlists[0] || { videos: [] };
+      const fallbackQueue = marathon.shuffleEnabled ? shuffleVideos(activePlaylist.videos) : [...activePlaylist.videos];
+      const currentVideoId = marathon.queue[marathon.position]?.id;
+      marathon.queue = fallbackQueue;
+      const nextIndex = marathon.queue.findIndex((video) => video.id === currentVideoId);
+      marathon.position = nextIndex >= 0 ? nextIndex : 0;
+      if (!marathon.queue.length) {
+        marathon.position = 0;
+        marathon.isPlaying = false;
+      }
+    }
+
     function renderMaratonView() {
-      const total = state.marathon.queue.length;
-      const hasQueue = total > 0;
+      ensureMarathonState();
+      const marathon = state.marathon;
+      const playlistOptions = marathon.playlists.map((playlist) => (
+        `<option value="${playlist.id}" ${playlist.id === marathon.activePlaylistId ? 'selected' : ''}>${playlist.name}</option>`
+      )).join('');
+      const currentVideo = marathon.queue[marathon.position] || null;
+      const embedUrl = currentVideo
+        ? toEmbedUrl(currentVideo.url_youtube || currentVideo.url_video || '', marathon.isPlaying ? 1 : 0)
+        : '';
       viewMaraton.innerHTML = `
-        <section class="hud-panel marathon">
-          <h2 class="section-title">Modo Maratón</h2>
-          <div class="actions">
-            <button id="startMarathonBtn" class="neon-btn neon-btn--primary">Iniciar maratón</button>
-            <button id="prevMarathonBtn" class="neon-btn" ${!hasQueue ? 'disabled' : ''}>⏮ Anterior</button>
-            <button id="pauseMarathonBtn" class="neon-btn" ${!hasQueue ? 'disabled' : ''}>⏯ Pausa/Reanudar</button>
-            <button id="nextMarathonBtn" class="neon-btn" ${!hasQueue ? 'disabled' : ''}>⏭ Siguiente</button>
-            <label class="muted" style="display:inline-flex; align-items:center; gap:8px;">
-              <input id="shuffleMarathon" type="checkbox" ${state.marathon.shuffleEnabled ? 'checked' : ''}>
-              Aleatorio
-            </label>
-          </div>
-          <p id="marathonState" class="section-subtitle"></p>
-          <div id="marathonPlayerHost" class="mock-box">
-            <div id="videoPlayer" aria-label="Reproductor de maratón"></div>
+        <section class="marathon">
+          <header class="marathon-header">
+            <h2 class="marathon-title">MARATÓN</h2>
+            <button id="addMarathonBtn" class="neon-btn toon-btn toon-btn--primary" type="button">Agregar maratón</button>
+          </header>
+          <div class="marathon-layout">
+            <div class="marathon-main">
+              <label class="marathon-playlist-label" for="marathonPlaylistSelect">Playlist activa</label>
+              <select id="marathonPlaylistSelect" aria-label="Playlist activa de maratón">
+                ${playlistOptions}
+              </select>
+              <div class="marathon-player-shell">
+                ${embedUrl
+                  ? `<iframe src="${embedUrl}" title="${escapeHtml(currentVideo?.titulo || 'Reproductor de maratón')}" allow="autoplay; encrypted-media" allowfullscreen></iframe>`
+                  : '<div class="marathon-empty">No hay videos disponibles para esta playlist.</div>'}
+              </div>
+              <div class="marathon-controls">
+                <button id="marathonPlayPauseBtn" class="neon-btn" type="button">${marathon.isPlaying ? 'Pausa' : 'Play'}</button>
+                <button id="marathonPrevBtn" class="neon-btn" type="button">Anterior</button>
+                <button id="marathonNextBtn" class="neon-btn" type="button">Siguiente</button>
+                <button id="marathonShuffleBtn" class="neon-btn" type="button">Reproducir aleatoriamente ${marathon.shuffleEnabled ? '✓' : ''}</button>
+              </div>
+            </div>
+            <aside class="marathon-side">
+              <p class="marathon-playlist-label">Videos de playlist</p>
+              <ul class="marathon-list">
+                ${marathon.queue.map((video, index) => `
+                  <li>
+                    <button type="button" class="marathon-item-btn ${index === marathon.position ? 'active' : ''}" data-marathon-index="${index}">
+                      <strong>${escapeHtml(video.titulo || video.personaje || `Video ${index + 1}`)}</strong>
+                      <small>${escapeHtml(video.personaje || 'Sin personaje')} · ${escapeHtml(video.actor_de_doblaje || 'Sin actor')}</small>
+                    </button>
+                  </li>
+                `).join('') || '<li class="marathon-empty">La playlist está vacía.</li>'}
+              </ul>
+            </aside>
           </div>
         </section>
       `;
 
-      document.getElementById('startMarathonBtn')?.addEventListener('click', startMarathon);
-      document.getElementById('nextMarathonBtn')?.addEventListener('click', playNext);
-      document.getElementById('prevMarathonBtn')?.addEventListener('click', playPrevious);
-      document.getElementById('pauseMarathonBtn')?.addEventListener('click', togglePause);
-      document.getElementById('shuffleMarathon')?.addEventListener('change', (event) => {
-        state.marathon.shuffleEnabled = Boolean(event.target.checked);
+      document.getElementById('addMarathonBtn')?.addEventListener('click', () => {
+        // Botón visual solicitado; sin lógica funcional por ahora.
       });
-
-      updateMarathonLabel();
-      if (state.marathon.active && state.marathon.queue[state.marathon.position]) {
-        playCurrent();
-      }
+      document.getElementById('marathonPlaylistSelect')?.addEventListener('change', (event) => {
+        state.marathon.activePlaylistId = event.target.value;
+        state.marathon.position = 0;
+        renderMaratonView();
+      });
+      document.getElementById('marathonPlayPauseBtn')?.addEventListener('click', () => {
+        if (!state.marathon.queue.length) return;
+        state.marathon.isPlaying = !state.marathon.isPlaying;
+        renderMaratonView();
+      });
+      document.getElementById('marathonPrevBtn')?.addEventListener('click', () => {
+        if (!state.marathon.queue.length) return;
+        const nextPosition = state.marathon.position > 0
+          ? state.marathon.position - 1
+          : state.marathon.queue.length - 1;
+        state.marathon.position = nextPosition;
+        state.marathon.isPlaying = true;
+        renderMaratonView();
+      });
+      document.getElementById('marathonNextBtn')?.addEventListener('click', () => {
+        if (!state.marathon.queue.length) return;
+        state.marathon.position = (state.marathon.position + 1) % state.marathon.queue.length;
+        state.marathon.isPlaying = true;
+        renderMaratonView();
+      });
+      document.getElementById('marathonShuffleBtn')?.addEventListener('click', () => {
+        state.marathon.shuffleEnabled = !state.marathon.shuffleEnabled;
+        state.marathon.position = 0;
+        renderMaratonView();
+      });
+      viewMaraton.querySelectorAll('[data-marathon-index]').forEach((button) => {
+        button.addEventListener('click', () => {
+          const selectedIndex = Number(button.dataset.marathonIndex);
+          if (!Number.isFinite(selectedIndex) || selectedIndex < 0 || selectedIndex >= state.marathon.queue.length) return;
+          state.marathon.position = selectedIndex;
+          state.marathon.isPlaying = true;
+          renderMaratonView();
+        });
+      });
     }
 
     function renderRarezasView() {
@@ -7589,29 +7867,23 @@
     }
 
     function startMarathon() {
-      const queue = getFilteredUniverseVideos().filter((video) => hasGreetingVideo(video));
-      if (!queue.length) {
-        finishMarathon('No hay videos reproducibles para iniciar la maratón.');
-        return;
-      }
-      state.marathon.active = true;
-      state.marathon.finished = false;
-      state.marathon.queue = queue;
+      const queue = getMarathonQueue();
+      if (!queue.length) return;
+      state.marathon.playlists = [{ id: 'auto', name: 'Automática', videos: queue }];
+      state.marathon.activePlaylistId = 'auto';
+      state.marathon.queue = state.marathon.shuffleEnabled ? shuffleVideos(queue) : [...queue];
       state.marathon.position = 0;
-      state.marathon.history = [0];
-      playCurrent();
+      state.marathon.isPlaying = true;
+      state.selectedVideoId = queue[0].id;
+      renderUniverseView();
+      updateMarathonLabel();
     }
 
-    async function playCurrent() {
-      if (!state.marathon.active) return;
-      const current = state.marathon.queue[state.marathon.position];
-      if (!current) {
-        finishMarathon();
-        return;
-      }
-      const currentId = getYoutubeId(current.url_youtube || current.url_video || '');
-      if (!currentId) {
-        playNext();
+    function nextInMarathon() {
+      if (!state.marathon.isPlaying) return;
+      if (state.marathon.position >= state.marathon.queue.length - 1) {
+        state.marathon.isPlaying = false;
+        updateMarathonLabel('Maratón finalizado.');
         return;
       }
       state.selectedVideoId = current.id;
@@ -7693,24 +7965,25 @@
         el.textContent = override;
         return;
       }
-      if (state.marathon.active && state.marathon.queue.length) {
-        const current = state.marathon.queue[state.marathon.position];
-        const title = current?.titulo || current?.personaje || 'Video';
-        el.textContent = `Reproduciendo ${state.marathon.position + 1} de ${state.marathon.queue.length}: ${title}`;
-      } else if (state.marathon.finished) {
-        el.textContent = 'Maratón finalizada. No hay más videos en cola.';
+      if (state.marathon.isPlaying) {
+        el.textContent = `Reproduciendo ${state.marathon.position + 1} de ${state.marathon.queue.length}`;
       } else {
         el.textContent = 'Modo Maratón desactivado';
       }
     }
 
     function attachPlayerEndedHandler() {
-      clearMarathonFallbackTimer();
-      if (!state.marathon.active || MARATHON_ENDED_FALLBACK_MS <= 0) return;
-      // Fallback opcional solamente si los eventos ENDED del IFrame API no están disponibles.
-      window.__marathonFallback = setTimeout(() => {
-        if (state.marathon.active) playNext();
-      }, MARATHON_ENDED_FALLBACK_MS);
+      const iframe = document.getElementById('videoPlayer');
+      if (!iframe) return;
+      const currentUrl = new URL(iframe.src);
+      const videoId = currentUrl.pathname.split('/').pop();
+
+      // Fallback simple: avanza cada 12s en modo maratón si no se puede captar evento "ended" del reproductor embebido.
+      // Esto mantiene la reproducción encadenada sin interacción adicional tras activar maratón.
+      clearTimeout(window.__marathonFallback);
+      if (state.marathon.isPlaying && videoId) {
+        window.__marathonFallback = setTimeout(nextInMarathon, 12000);
+      }
     }
 
     function changeView(next) {
@@ -7736,7 +8009,8 @@
         universe: navUniverses,
         characterProfile: navIndice,
         indice: navIndice,
-        actores: navActores
+        actores: navActores,
+        maraton: navMaraton
       };
       activeNavByView[next]?.classList.add('active');
 
@@ -7767,6 +8041,7 @@
     navUniverses.onclick = () => changeView(state.universe ? 'universe' : 'map');
     navIndice.onclick = () => changeView('indice');
     navActores.onclick = () => changeView('actores');
+    navMaraton.onclick = () => changeView('maraton');
 
     state.universeNodes = loadUniverseNodesFromStorage();
     loadVideosFromStorage();
