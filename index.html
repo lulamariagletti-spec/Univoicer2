@@ -3922,6 +3922,11 @@
       videos: []
     };
 
+    const MARATHON_ENDED_FALLBACK_MS = 0; // Fallback opcional: 0 = desactivado.
+    let marathonPlayer = null;
+    let marathonPlayerReady = false;
+    let marathonPlayerApiPromise = null;
+
     const appLayout = document.getElementById('appLayout');
     const toggleSidebar = document.getElementById('toggleSidebar');
     const navUniverses = document.getElementById('navUniverses');
@@ -7811,6 +7816,56 @@
       return text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-');
     }
 
+    function ensureYoutubeIframeApi() {
+      if (window.YT?.Player) return Promise.resolve(window.YT);
+      if (marathonPlayerApiPromise) return marathonPlayerApiPromise;
+      marathonPlayerApiPromise = new Promise((resolve) => {
+        const previous = window.onYouTubeIframeAPIReady;
+        window.onYouTubeIframeAPIReady = () => {
+          if (typeof previous === 'function') previous();
+          resolve(window.YT);
+        };
+        if (!document.querySelector('script[src="https://www.youtube.com/iframe_api"]')) {
+          const script = document.createElement('script');
+          script.src = 'https://www.youtube.com/iframe_api';
+          document.head.appendChild(script);
+        }
+      });
+      return marathonPlayerApiPromise;
+    }
+
+    function clearMarathonFallbackTimer() {
+      clearTimeout(window.__marathonFallback);
+    }
+
+    async function ensureMarathonPlayer() {
+      const mount = document.getElementById('videoPlayer');
+      if (!mount) return null;
+      await ensureYoutubeIframeApi();
+      if (marathonPlayer && marathonPlayer.getIframe && document.body.contains(marathonPlayer.getIframe())) {
+        return marathonPlayer;
+      }
+      marathonPlayerReady = false;
+      marathonPlayer = new window.YT.Player('videoPlayer', {
+        playerVars: { rel: 0, modestbranding: 1, autoplay: 1 },
+        events: {
+          onReady: () => { marathonPlayerReady = true; },
+          onStateChange: (event) => {
+            if (event.data === window.YT.PlayerState.ENDED) playNext();
+          }
+        }
+      });
+      return marathonPlayer;
+    }
+
+    function finishMarathon(message = 'Maratón finalizada. No hay más videos en cola.') {
+      state.marathon.active = false;
+      state.marathon.finished = true;
+      clearMarathonFallbackTimer();
+      if (marathonPlayerReady && marathonPlayer?.stopVideo) marathonPlayer.stopVideo();
+      updateMarathonLabel(message);
+    }
+
     function startMarathon() {
       const queue = getMarathonQueue();
       if (!queue.length) return;
@@ -7831,11 +7886,76 @@
         updateMarathonLabel('Maratón finalizado.');
         return;
       }
-      state.marathon.position += 1;
-      const current = state.marathon.queue[state.marathon.position];
       state.selectedVideoId = current.id;
-      renderUniverseView();
+      if (state.view === 'universe') renderUniverseView();
       updateMarathonLabel();
+
+      const player = await ensureMarathonPlayer();
+      if (!player) return;
+      if (player.loadVideoById) player.loadVideoById(currentId);
+      attachPlayerEndedHandler();
+    }
+
+    function pickRandomUnplayedIndex() {
+      const played = new Set(state.marathon.history);
+      const options = state.marathon.queue
+        .map((_, index) => index)
+        .filter((index) => !played.has(index));
+      if (!options.length) return -1;
+      return options[Math.floor(Math.random() * options.length)];
+    }
+
+    function playNext() {
+      if (!state.marathon.active) return;
+      const { queue, shuffleEnabled } = state.marathon;
+      if (!queue.length) {
+        finishMarathon();
+        return;
+      }
+
+      if (shuffleEnabled) {
+        const nextIndex = pickRandomUnplayedIndex();
+        if (nextIndex < 0) {
+          finishMarathon();
+          return;
+        }
+        state.marathon.position = nextIndex;
+      } else if (state.marathon.position >= queue.length - 1) {
+        finishMarathon();
+        return;
+      } else {
+        state.marathon.position += 1;
+      }
+
+      if (state.marathon.history[state.marathon.history.length - 1] !== state.marathon.position) {
+        state.marathon.history.push(state.marathon.position);
+      }
+      playCurrent();
+    }
+
+    function playPrevious() {
+      if (!state.marathon.active) return;
+      if (state.marathon.history.length > 1) {
+        state.marathon.history.pop();
+        state.marathon.position = state.marathon.history[state.marathon.history.length - 1];
+        playCurrent();
+        return;
+      }
+      if (state.marathon.position > 0) {
+        state.marathon.position -= 1;
+        state.marathon.history = [state.marathon.position];
+        playCurrent();
+      }
+    }
+
+    function togglePause() {
+      if (!marathonPlayerReady || !marathonPlayer) return;
+      const currentState = marathonPlayer.getPlayerState?.();
+      if (currentState === window.YT.PlayerState.PLAYING) {
+        marathonPlayer.pauseVideo();
+      } else {
+        marathonPlayer.playVideo();
+      }
     }
 
     function updateMarathonLabel(override) {
